@@ -1,4 +1,4 @@
-// server.js - NVIDIA NIM Proxy (Janitor AI + Free Hosting Optimized)
+// server.js - NVIDIA NIM Proxy (Janitor AI + DeepSeek v3.2 optimized)
 
 const express = require('express');
 const cors = require('cors');
@@ -17,14 +17,11 @@ const NIM_API_KEY = process.env.NIM_API_KEY;
 const ENABLE_THINKING_MODE = false;
 const SHOW_REASONING = false;
 
-// Keep models simple & fast
-const MODEL_MAPPING = {
-  'gpt-4': 'meta/llama-3.1-8b-instruct',
-  'gpt-4o': 'meta/llama-3.1-8b-instruct',
-  'gpt-3.5-turbo': 'meta/llama-3.1-8b-instruct'
-};
+// 🔒 LOCKED MODEL (Janitor name → NIM name)
+const JANITOR_MODEL_ID = 'deepseek-v3_2';
+const NIM_MODEL_ID = 'deepseek-ai/deepseek-v3.1';
 
-// Root (used by uptime pingers)
+// Root
 app.get('/', (_, res) => {
   res.json({ status: 'ok' });
 });
@@ -34,28 +31,28 @@ app.get('/health', (_, res) => {
   res.json({ status: 'ok' });
 });
 
-// Models
+// Models (Janitor reads this)
 app.get('/v1/models', (_, res) => {
   res.json({
     object: 'list',
-    data: Object.keys(MODEL_MAPPING).map(id => ({
-      id,
-      object: 'model',
-      created: Date.now(),
-      owned_by: 'nim'
-    }))
+    data: [
+      {
+        id: JANITOR_MODEL_ID,
+        object: 'model',
+        created: Date.now(),
+        owned_by: 'deepseek'
+      }
+    ]
   });
 });
 
 // Chat completions (NO streaming)
 app.post('/v1/chat/completions', async (req, res) => {
   try {
-    const { model, messages, max_tokens, temperature } = req.body;
-
-    const nimModel = MODEL_MAPPING[model] || MODEL_MAPPING['gpt-4'];
+    const { messages, max_tokens, temperature } = req.body;
 
     const nimRequest = {
-      model: nimModel,
+      model: NIM_MODEL_ID,
       messages,
       max_tokens: Math.min(max_tokens || 512, 1024),
       temperature: temperature ?? 0.7,
@@ -66,7 +63,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       `${NIM_API_BASE}/chat/completions`,
       nimRequest,
       {
-        timeout: 20000, // shorter timeout helps Janitor retries
+        timeout: 20000, // Janitor-safe
         headers: {
           Authorization: `Bearer ${NIM_API_KEY}`,
           'Content-Type': 'application/json'
@@ -78,7 +75,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       id: `chatcmpl-${Date.now()}`,
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
-      model,
+      model: JANITOR_MODEL_ID,
       choices: response.data.choices.map((c, i) => ({
         index: i,
         message: {
@@ -98,7 +95,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     console.error(err.message);
     res.status(500).json({
       error: {
-        message: 'Upstream request failed',
+        message: 'Upstream DeepSeek request failed',
         type: 'server_error'
       }
     });
@@ -106,5 +103,5 @@ app.post('/v1/chat/completions', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🟢 Janitor AI proxy running on port ${PORT}`);
+  console.log(`🟢 Janitor AI DeepSeek v3.2 proxy running on port ${PORT}`);
 });
