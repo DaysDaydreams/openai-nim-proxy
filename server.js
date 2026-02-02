@@ -71,7 +71,7 @@ app.post("/v1/chat/completions", async (req, res) => {
         stream: stream || false,
       };
 
-      const response = await fetch("https://api.nvidia.com/v1/deepseek/completions", {
+      const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${process.env.NIM_KEY}`,
