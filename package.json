@@ -1,17 +1,13 @@
 {
-  "name": "janitor-deepseek-proxy",
+  "name": "nim-openai-proxy",
   "version": "1.0.0",
-  "main": "server.js",
-  "type": "commonjs",
+  "private": true,
   "scripts": {
     "start": "node server.js"
   },
-  "engines": {
-    "node": ">=18"
-  },
   "dependencies": {
-    "express": "^4.18.2",
-    "node-fetch": "^2.6.7",
-    "cors": "^2.8.5"
+    "axios": "^1.6.8",
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
   }
 }
