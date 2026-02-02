@@ -3,6 +3,7 @@
 // 1️⃣ Unlimited tokens via automatic chunking
 // 2️⃣ Streaming support
 // 3️⃣ Proper error handling and logging
+// 4️⃣ Correct route: /v1/chat/completions
 
 const express = require("express");
 const fetch = require("node-fetch");
@@ -18,7 +19,7 @@ const TOKEN_BUFFER = 50; // buffer to avoid hitting hard limit
 app.use(cors());
 app.use(express.json());
 
-// --- Utility: estimate token count roughly (simplified) ---
+// --- Utility: estimate token count roughly ---
 function estimateTokens(text) {
   return Math.ceil(text.length / 4); // rough estimate: 1 token ≈ 4 chars
 }
@@ -43,7 +44,8 @@ function chunkMessages(messages) {
   return chunks;
 }
 
-app.post("/chat/completions", async (req, res) => {
+// --- Main proxy route (matches Janitor AI expectation) ---
+app.post("/v1/chat/completions", async (req, res) => {
   try {
     const { messages, stream, model } = req.body;
 
@@ -52,7 +54,6 @@ app.post("/chat/completions", async (req, res) => {
     }
 
     const messageChunks = chunkMessages(messages);
-
     let finalResponseText = "";
 
     // --- Streaming headers ---
@@ -100,10 +101,8 @@ app.post("/chat/completions", async (req, res) => {
           const chunkText = decoder.decode(value, { stream: true });
           res.write(`data: ${chunkText}\n\n`);
         }
-        // continue to next chunk if any
       } else {
         const data = await response.json();
-        // assuming standard OpenAI-style choices[0].message.content
         if (data.choices && data.choices[0] && data.choices[0].message) {
           finalResponseText += data.choices[0].message.content;
         }
@@ -129,6 +128,11 @@ app.post("/chat/completions", async (req, res) => {
       },
     });
   }
+});
+
+// --- Optional redirect for backward compatibility ---
+app.post("/chat/completions", (req, res) => {
+  res.redirect(307, "/v1/chat/completions");
 });
 
 // --- Health check ---
