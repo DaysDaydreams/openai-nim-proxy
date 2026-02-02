@@ -1,143 +1,126 @@
-// server.js - Janitor AI → DeepSeek v3.2 proxy
-// Features:
-// 1️⃣ Unlimited tokens via automatic chunking
-// 2️⃣ Streaming support
-// 3️⃣ Proper error handling and logging
-// 4️⃣ Correct route: /v1/chat/completions
-
-const express = require("express");
-const fetch = require("node-fetch");
-const cors = require("cors");
+// server.js - OpenAI-compatible NIM Proxy with streaming
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// DeepSeek model token limit (v3.2)
-const MAX_TOKENS = 8192;
-const TOKEN_BUFFER = 50; // buffer to avoid hitting hard limit
-
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
-// --- Utility: estimate token count roughly ---
-function estimateTokens(text) {
-  return Math.ceil(text.length / 4); // rough estimate: 1 token ≈ 4 chars
-}
+const NIM_API_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
+const NIM_API_KEY = process.env.NIM_API_KEY;
 
-// --- Utility: split messages into chunks under MAX_TOKENS ---
-function chunkMessages(messages) {
-  let chunks = [];
-  let currentChunk = [];
-  let currentTokens = 0;
+// Model mapping (OpenAI/Janitor → NIM)
+const MODEL_MAP = {
+  'deepseek-v3_2': 'deepseek-ai/deepseek-v3.1',
+  'gpt-4o-mini': 'deepseek-ai/deepseek-v3.1'
+};
 
-  for (const msg of messages) {
-    const tokens = estimateTokens(msg.content);
-    if (currentTokens + tokens + TOKEN_BUFFER > MAX_TOKENS) {
-      if (currentChunk.length) chunks.push(currentChunk);
-      currentChunk = [];
-      currentTokens = 0;
-    }
-    currentChunk.push(msg);
-    currentTokens += tokens;
-  }
-  if (currentChunk.length) chunks.push(currentChunk);
-  return chunks;
-}
+// Root / Health
+app.get('/', (_, res) => res.json({ status: 'ok' }));
+app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
-// --- Main proxy route (matches Janitor AI expectation) ---
-app.post("/v1/chat/completions", async (req, res) => {
+// Models endpoint
+app.get('/v1/models', (_, res) => {
+  const data = Object.keys(MODEL_MAP).map((id) => ({
+    id,
+    object: 'model',
+    created: Date.now(),
+    owned_by: 'deepseek'
+  }));
+
+  res.json({ object: 'list', data });
+});
+
+// Chat completions endpoint
+app.post('/v1/chat/completions', async (req, res) => {
+  const { model, messages, max_tokens, temperature, stream } = req.body;
+  const nimModel = MODEL_MAP[model];
+
+  if (!nimModel) return res.status(400).json({ error: { message: 'Model not supported' } });
+
   try {
-    const { messages, stream, model } = req.body;
+    const nimRequest = {
+      model: nimModel,
+      messages,
+      max_tokens: Math.min(max_tokens || 512, 1024),
+      temperature: temperature ?? 0.7,
+      stream: Boolean(stream)
+    };
 
-    if (!messages || !Array.isArray(messages)) {
-      return res.status(400).json({ error: { message: "Missing or invalid messages array" } });
-    }
-
-    const messageChunks = chunkMessages(messages);
-    let finalResponseText = "";
-
-    // --- Streaming headers ---
+    // Streaming mode
     if (stream) {
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-    }
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders();
 
-    for (const chunk of messageChunks) {
-      const body = {
-        model: model || "deepseek_v3_2",
-        messages: chunk,
-        max_tokens: MAX_TOKENS - TOKEN_BUFFER,
-        stream: stream || false,
-      };
-
-      const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
-        method: "POST",
+      const nimStream = await axios({
+        method: 'post',
+        url: `${NIM_API_BASE}/chat/completions`,
+        data: nimRequest,
         headers: {
-          "Authorization": `Bearer ${process.env.NIM_KEY}`,
-          "Content-Type": "application/json",
+          Authorization: `Bearer ${NIM_API_KEY}`,
+          'Content-Type': 'application/json'
         },
-        body: JSON.stringify(body),
+        responseType: 'stream',
+        timeout: 0 // let streaming go as long as needed
       });
 
-      if (!response.ok) {
-        const text = await response.text();
-        console.error("Upstream returned error:", response.status, text);
-        return res.status(500).json({
-          error: {
-            message: "Upstream DeepSeek/NIM request failed",
-            status: response.status,
-            details: text,
-          },
-        });
-      }
-
-      if (stream) {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          const chunkText = decoder.decode(value, { stream: true });
-          res.write(`data: ${chunkText}\n\n`);
+      nimStream.data.on('data', (chunk) => {
+        // Forward each chunk to client
+        const lines = chunk.toString().split('\n').filter(Boolean);
+        for (const line of lines) {
+          // NIM may or may not prefix with "data: ", normalize to SSE
+          const payload = line.replace(/^data:\s*/, '');
+          res.write(`data: ${payload}\n\n`);
         }
-      } else {
-        const data = await response.json();
-        if (data.choices && data.choices[0] && data.choices[0].message) {
-          finalResponseText += data.choices[0].message.content;
-        }
-      }
-    }
-
-    if (!stream) {
-      res.json({
-        id: `chunked-${Date.now()}`,
-        object: "chat.completion",
-        choices: [{ message: { role: "assistant", content: finalResponseText } }],
       });
+
+      nimStream.data.on('end', () => {
+        res.write('data: [DONE]\n\n');
+        res.end();
+      });
+
+      nimStream.data.on('error', (err) => {
+        console.error(err.message);
+        res.write(`data: ${JSON.stringify({ error: 'Upstream NIM error' })}\n\n`);
+        res.end();
+      });
+
     } else {
-      res.end();
-    }
+      // Normal full response
+      const response = await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
+        headers: { Authorization: `Bearer ${NIM_API_KEY}` },
+        timeout: 20000
+      });
 
+      res.json({
+        id: `chatcmpl-${Date.now()}`,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model,
+        choices: response.data.choices.map((c, i) => ({
+          index: i,
+          message: {
+            role: 'assistant',
+            content: c.message?.content || ''
+          },
+          finish_reason: c.finish_reason || 'stop'
+        })),
+        usage: response.data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+      });
+    }
   } catch (err) {
-    console.error("Proxy Error:", err);
+    console.error(err.message, err.response?.data);
     res.status(500).json({
-      error: {
-        message: "Proxy processing failed",
-        details: err.message,
-      },
+      error: { message: 'Upstream DeepSeek/NIM request failed', type: 'server_error' }
     });
   }
 });
 
-// --- Optional redirect for backward compatibility ---
-app.post("/chat/completions", (req, res) => {
-  res.redirect(307, "/v1/chat/completions");
-});
-
-// --- Health check ---
-app.get("/", (req, res) => res.send("Janitor AI → DeepSeek proxy is running."));
-
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`🟢 OpenAI-compatible NIM Proxy (streaming) running on port ${PORT}`);
 });
