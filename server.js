@@ -15,7 +15,7 @@ const NIM_API_BASE =
 
 const NIM_API_KEY = process.env.NIM_API_KEY;
 
-const ACTIVE_MODEL = 'deepseek-ai/deepseek-v3_2';
+const ACTIVE_MODEL = "deepseek-v3_2";
 
 // Health
 app.get('/', (_, res) => res.json({ status: 'ok' }));
