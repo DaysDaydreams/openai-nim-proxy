@@ -69,6 +69,8 @@ app.post("/v1/chat/completions", async (req, res) => {
     { role: "user", content: "hello" }
   ];
 
+  const max_tokens = req.body.max_tokens; // ✅ FIX ADDED
+
   const nimRequest = {
     model: ACTIVE_MODEL,
     messages,
@@ -94,24 +96,45 @@ app.post("/v1/chat/completions", async (req, res) => {
       response.data?.choices?.[0]?.message?.content ||
       "No response generated";
 
-   return res.json({
-  id: `chatcmpl-${Date.now()}`,
-  object: "chat.completion",
-  created: Math.floor(Date.now() / 1000),
-  model: "meta/llama-3.1-8b-instruct",
-  choices: [
-    {
-      index: 0,
-      message: {
-        role: "assistant",
-        content: String(text).slice(0, 500) || "Hello"
-      },
-      finish_reason: "stop"
-    }
-  ]
-});
+    return res.json({
+      id: `chatcmpl-${Date.now()}`,
+      object: "chat.completion",
+      created: Math.floor(Date.now() / 1000),
+      model: ACTIVE_MODEL,
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: String(text) // ❗ removed forced 500 char cut
+          },
+          finish_reason: "stop"
+        }
+      ]
+    });
+
   } catch (err) {
     console.error("NIM ERROR:", err.response?.data || err.message);
+
+    return res.json({
+      id: `chatcmpl-${Date.now()}`,
+      object: "chat.completion",
+      created: Math.floor(Date.now() / 1000),
+      model: ACTIVE_MODEL,
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content:
+              "⚡ Server is warming up. Please try again in a moment."
+          },
+          finish_reason: "stop"
+        }
+      ]
+    });
+  }
+});
 
     // ⚡ FAST FALLBACK (prevents Janitor "Network Error")
     return res.json({
