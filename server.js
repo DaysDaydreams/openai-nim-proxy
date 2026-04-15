@@ -69,12 +69,13 @@ app.post("/v1/chat/completions", async (req, res) => {
     { role: "user", content: "hello" }
   ];
 
-  const max_tokens = req.body.max_tokens; // ✅ FIX ADDED
+  // ✅ FIX: explicitly define it
+  const max_tokens = req.body.max_tokens ?? 2048;
 
   const nimRequest = {
     model: ACTIVE_MODEL,
     messages,
-    max_tokens: Math.min(max_tokens || 2048, 2048),
+    max_tokens: Math.min(max_tokens, 2048),
     temperature: req.body.temperature ?? 0.7,
     stream: false
   };
@@ -106,7 +107,7 @@ app.post("/v1/chat/completions", async (req, res) => {
           index: 0,
           message: {
             role: "assistant",
-            content: String(text) // ❗ removed forced 500 char cut
+            content: String(text) // no truncation
           },
           finish_reason: "stop"
         }
