@@ -72,7 +72,7 @@ app.post("/v1/chat/completions", async (req, res) => {
   const nimRequest = {
     model: ACTIVE_MODEL,
     messages,
-    max_tokens: Math.min(req.body.max_tokens || 256, 256),
+    max_tokens: Math.min(max_tokens || 2048, 2048),
     temperature: req.body.temperature ?? 0.7,
     stream: false
   };
