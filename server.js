@@ -16,8 +16,9 @@ const NIM_API_KEY = process.env.NIM_API_KEY;
  * Candidate models (newest → oldest)
  */
 const MODEL_CANDIDATES = [
-  'deepseek-ai/deepseek-v3.2',
-  'deepseek-ai/deepseek-v3.1'
+  'deepseek-ai/deepseek-v3',
+  'deepseek-ai/deepseek-v3.1',
+  'deepseek-ai/deepseek-v3.2'
 ];
 
 let ACTIVE_MODEL = null;
