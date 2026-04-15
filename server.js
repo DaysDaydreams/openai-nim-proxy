@@ -1,4 +1,5 @@
-// server.js - OpenAI-compatible NIM Proxy (stable + race-safe + fallback)
+// server.js - OpenAI-compatible NIM Proxy (DeepSeek v3.2 only)
+
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -12,125 +13,42 @@ app.use(express.json({ limit: '2mb' }));
 const NIM_API_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
 const NIM_API_KEY = process.env.NIM_API_KEY;
 
-/**
- * Candidate models (newest → oldest)
- */
-const MODEL_CANDIDATES = [
-  'deepseek-ai/deepseek-v3',
-  'deepseek-ai/deepseek-v3.1',
-  'deepseek-ai/deepseek-v3.2'
-];
+// ✅ ONLY VALID MODEL (based on your /v1/models response)
+const ACTIVE_MODEL = 'deepseek-ai/deepseek-v3.2';
 
-let ACTIVE_MODEL = null;
-let MODEL_READY = false;
-
-/**
- * Try models until one works
- */
-async function resolveModel() {
-  for (const model of MODEL_CANDIDATES) {
-    try {
-      await axios.post(
-        `${NIM_API_BASE}/chat/completions`,
-        {
-          model,
-          messages: [{ role: 'user', content: 'ping' }],
-          max_tokens: 1,
-          temperature: 0
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${NIM_API_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 8000
-        }
-      );
-
-      console.log(`✅ Using model: ${model}`);
-      return model;
-    } catch (err) {
-      console.log(`❌ Failed model: ${model}`);
-    }
-  }
-
-  throw new Error('No working DeepSeek model found');
-}
-
-/**
- * Startup init (safe + tracked)
- */
-const modelInitPromise = (async () => {
-  try {
-    ACTIVE_MODEL = await resolveModel();
-    MODEL_READY = true;
-    console.log('🟢 Model ready:', ACTIVE_MODEL);
-  } catch (err) {
-    MODEL_READY = false;
-    console.error('❌ Model init failed:', err.message);
-  }
-})();
-
-/**
- * Middleware: block chat until model is ready
- */
-app.use(async (req, res, next) => {
-  if (req.path.startsWith('/v1/chat/completions')) {
-    await modelInitPromise;
-
-    if (!MODEL_READY || !ACTIVE_MODEL) {
-      return res.status(503).json({
-        error: { message: 'Model not initialized or unavailable' }
-      });
-    }
-  }
-  next();
-});
-
-// Health
+// Root / Health
 app.get('/', (_, res) => res.json({ status: 'ok' }));
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
-// Models endpoint
+// Models endpoint (OpenAI-style)
 app.get('/v1/models', (_, res) => {
   res.json({
     object: 'list',
     data: [
       {
-        id: 'deepseek-v3',
+        id: ACTIVE_MODEL,
         object: 'model',
         created: Date.now(),
-        owned_by: 'deepseek',
-        active: ACTIVE_MODEL
+        owned_by: 'deepseek-ai'
       }
     ]
   });
 });
 
-// Get model safely
-async function getActiveModel() {
-  if (ACTIVE_MODEL) return ACTIVE_MODEL;
-  ACTIVE_MODEL = await resolveModel();
-  MODEL_READY = true;
-  return ACTIVE_MODEL;
-}
-
-// Chat completions endpoint
+// Chat Completions
 app.post('/v1/chat/completions', async (req, res) => {
   const { messages, max_tokens, temperature, stream } = req.body;
 
   try {
-    const model = await getActiveModel();
-
     const nimRequest = {
-      model,
+      model: ACTIVE_MODEL,
       messages,
       max_tokens: Math.min(max_tokens || 512, 1024),
       temperature: temperature ?? 0.7,
       stream: Boolean(stream)
     };
 
-    // STREAMING
+    // 🔁 STREAMING
     if (stream) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -170,7 +88,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       });
 
     } else {
-      // NORMAL REQUEST
+      // 📦 NORMAL REQUEST
       const response = await axios.post(
         `${NIM_API_BASE}/chat/completions`,
         nimRequest,
@@ -187,7 +105,7 @@ app.post('/v1/chat/completions', async (req, res) => {
         id: `chatcmpl-${Date.now()}`,
         object: 'chat.completion',
         created: Math.floor(Date.now() / 1000),
-        model,
+        model: ACTIVE_MODEL,
         choices: response.data.choices.map((c, i) => ({
           index: i,
           message: {
@@ -220,4 +138,5 @@ app.post('/v1/chat/completions', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`🟢 NIM Proxy running on port ${PORT}`);
+  console.log(`🤖 Using model: ${ACTIVE_MODEL}`);
 });
