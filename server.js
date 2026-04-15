@@ -40,12 +40,13 @@ app.post('/v1/chat/completions', async (req, res) => {
   const { messages, max_tokens, temperature, stream } = req.body;
 
   try {
-    const nimRequest = {
-      model: ACTIVE_MODEL,
-      messages,
-      max_tokens: Math.min(max_tokens || 512, 1024),
-      temperature: temperature ?? 0.7,
-      stream: Boolean(stream)
+const nimRequest = {
+  model: "deepseek-ai/deepseek-v3.2",
+  messages: messages || [{ role: "user", content: "hello" }],
+  max_tokens: Math.min(max_tokens || 256, 256),
+  temperature: temperature ?? 0.7,
+  stream: false
+};
     };
 
     // 🔁 STREAMING
@@ -61,8 +62,9 @@ app.post('/v1/chat/completions', async (req, res) => {
         data: nimRequest,
         headers: {
           Authorization: `Bearer ${NIM_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        }
         responseType: 'stream',
         timeout: 0
       });
