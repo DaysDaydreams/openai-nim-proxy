@@ -1,4 +1,4 @@
-// server.js - OpenAI-compatible NIM Proxy (FIXED)
+// server.js - OpenAI-compatible NIM Proxy (LLAMA 3.1 FIXED)
 
 const express = require('express');
 const cors = require('cors');
@@ -15,14 +15,14 @@ const NIM_API_BASE =
 
 const NIM_API_KEY = process.env.NIM_API_KEY;
 
-// ✅ stable working model
-const ACTIVE_MODEL = "mistralai/mistral-large";
+// ✅ Stable working model from your NVIDIA list
+const ACTIVE_MODEL = "meta/llama-3.1-8b-instruct";
 
 // Health
 app.get('/', (_, res) => res.json({ status: 'ok' }));
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
-// Models (IMPORTANT: keep consistent)
+// Models endpoint (OpenAI-style)
 app.get('/v1/models', (_, res) => {
   res.json({
     object: 'list',
@@ -31,7 +31,7 @@ app.get('/v1/models', (_, res) => {
         id: ACTIVE_MODEL,
         object: 'model',
         created: Date.now(),
-        owned_by: 'mistralai'
+        owned_by: 'meta'
       }
     ]
   });
@@ -39,15 +39,15 @@ app.get('/v1/models', (_, res) => {
 
 // Chat Completions
 app.post('/v1/chat/completions', async (req, res) => {
-  const { messages, max_tokens, temperature, stream } = req.body;
+  const { messages, max_tokens, temperature } = req.body;
 
   try {
     const nimRequest = {
       model: ACTIVE_MODEL,
       messages: messages || [{ role: 'user', content: 'hello' }],
-      max_tokens: max_tokens || 512,
+      max_tokens: max_tokens || 256,
       temperature: temperature ?? 0.7,
-      stream: Boolean(stream)
+      stream: false
     };
 
     const response = await axios.post(
