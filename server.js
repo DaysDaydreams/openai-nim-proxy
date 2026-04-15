@@ -1,4 +1,4 @@
-// server.js - Janitor-safe OpenAI proxy (stable + fast fallback)
+// server.js - Janitor-safe OpenAI proxy (stable + simple)
 
 const express = require("express");
 const cors = require("cors");
@@ -13,39 +13,25 @@ app.use(express.json({ limit: "2mb" }));
 const NIM_API_BASE =
   process.env.NIM_API_BASE || "https://integrate.api.nvidia.com/v1";
 
+// 🔑 PUT YOUR KEY IN RENDER ENV: NIM_API_KEY
 const NIM_API_KEY = process.env.NIM_API_KEY;
 
-// ⚡ SINGLE STABLE MODEL
+// ✅ Stable model
 const ACTIVE_MODEL = "meta/llama-3.1-8b-instruct";
 
 /* =========================
-   ⚡ FAST WARM MIDDLEWARE
+   HEALTH CHECK
 ========================= */
-app.use((req, res, next) => {
-  res.setTimeout(20000, () => {
-    if (!res.headersSent) {
-      return res.status(504).json({
-        error: {
-          message: "Timeout - upstream slow",
-          type: "timeout_error"
-        }
-      });
-    }
-  });
-  next();
+app.get("/", (_, res) => {
+  res.json({ status: "ok" });
+});
+
+app.get("/ping", (_, res) => {
+  res.json({ status: "alive", time: Date.now() });
 });
 
 /* =========================
-   HEALTH
-========================= */
-app.get("/", (_, res) => res.json({ status: "ok" }));
-
-app.get("/ping", (_, res) =>
-  res.json({ status: "ok", time: Date.now() })
-);
-
-/* =========================
-   MODELS (Janitor requires this)
+   MODELS (required for Janitor)
 ========================= */
 app.get("/v1/models", (_, res) => {
   res.json({
@@ -65,22 +51,22 @@ app.get("/v1/models", (_, res) => {
    CHAT COMPLETIONS
 ========================= */
 app.post("/v1/chat/completions", async (req, res) => {
-  const messages = req.body.messages || [
-    { role: "user", content: "hello" }
-  ];
-
-  // ✅ FIX: explicitly define it
-  const max_tokens = req.body.max_tokens ?? 2048;
-
-  const nimRequest = {
-    model: ACTIVE_MODEL,
-    messages,
-    max_tokens: Math.min(max_tokens, 2048),
-    temperature: req.body.temperature ?? 0.7,
-    stream: false
-  };
-
   try {
+    const messages = req.body.messages || [
+      { role: "user", content: "hello" }
+    ];
+
+    // ✅ FIXED: safe max_tokens handling
+    const max_tokens = req.body.max_tokens ?? 512;
+
+    const nimRequest = {
+      model: ACTIVE_MODEL,
+      messages,
+      max_tokens: Math.min(max_tokens, 1024),
+      temperature: req.body.temperature ?? 0.7,
+      stream: false
+    };
+
     const response = await axios.post(
       `${NIM_API_BASE}/chat/completions`,
       nimRequest,
@@ -107,7 +93,7 @@ app.post("/v1/chat/completions", async (req, res) => {
           index: 0,
           message: {
             role: "assistant",
-            content: String(text) // no truncation
+            content: String(text)
           },
           finish_reason: "stop"
         }
@@ -115,8 +101,9 @@ app.post("/v1/chat/completions", async (req, res) => {
     });
 
   } catch (err) {
-    console.error("NIM ERROR:", err.response?.data || err.message);
+    console.error("ERROR:", err.response?.data || err.message);
 
+    // ⚡ SAFE FALLBACK (prevents Janitor "Network Error")
     return res.json({
       id: `chatcmpl-${Date.now()}`,
       object: "chat.completion",
@@ -128,37 +115,11 @@ app.post("/v1/chat/completions", async (req, res) => {
           message: {
             role: "assistant",
             content:
-              "⚡ Server is warming up. Please try again in a moment."
+              "⚡ Temporary issue. Please try again."
           },
           finish_reason: "stop"
         }
       ]
-    });
-  }
-});
-
-    // ⚡ FAST FALLBACK (prevents Janitor "Network Error")
-    return res.json({
-      id: `chatcmpl-${Date.now()}`,
-      object: "chat.completion",
-      created: Math.floor(Date.now() / 1000),
-      model: ACTIVE_MODEL,
-      choices: [
-        {
-          index: 0,
-          message: {
-            role: "assistant",
-            content:
-              "⚡ Server is warming up. Please try again in a moment."
-          },
-          finish_reason: "stop"
-        }
-      ],
-      usage: {
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        total_tokens: 0
-      }
     });
   }
 });
@@ -167,6 +128,6 @@ app.post("/v1/chat/completions", async (req, res) => {
    START SERVER
 ========================= */
 app.listen(PORT, () => {
-  console.log(`🟢 Janitor-safe proxy running on port ${PORT}`);
+  console.log(`🟢 Proxy running on port ${PORT}`);
   console.log(`🤖 Model: ${ACTIVE_MODEL}`);
 });
