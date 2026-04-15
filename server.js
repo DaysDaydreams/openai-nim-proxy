@@ -1,4 +1,4 @@
-// server.js - OpenAI-compatible NIM Proxy with auto model fallback
+// server.js - OpenAI-compatible NIM Proxy (stable + race-safe + fallback)
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -14,15 +14,14 @@ const NIM_API_KEY = process.env.NIM_API_KEY;
 
 /**
  * Candidate models (newest → oldest)
- * This avoids breaking when NVIDIA deprecates versions
  */
 const MODEL_CANDIDATES = [
   'deepseek-ai/deepseek-v3.2',
   'deepseek-ai/deepseek-v3.1'
 ];
 
-// Cache working model after first success
 let ACTIVE_MODEL = null;
+let MODEL_READY = false;
 
 /**
  * Try models until one works
@@ -57,20 +56,41 @@ async function resolveModel() {
   throw new Error('No working DeepSeek model found');
 }
 
-// Initialize model on startup
-(async () => {
+/**
+ * Startup init (safe + tracked)
+ */
+const modelInitPromise = (async () => {
   try {
     ACTIVE_MODEL = await resolveModel();
+    MODEL_READY = true;
+    console.log('🟢 Model ready:', ACTIVE_MODEL);
   } catch (err) {
-    console.error('Model init failed:', err.message);
+    MODEL_READY = false;
+    console.error('❌ Model init failed:', err.message);
   }
 })();
+
+/**
+ * Middleware: block chat until model is ready
+ */
+app.use(async (req, res, next) => {
+  if (req.path.startsWith('/v1/chat/completions')) {
+    await modelInitPromise;
+
+    if (!MODEL_READY || !ACTIVE_MODEL) {
+      return res.status(503).json({
+        error: { message: 'Model not initialized or unavailable' }
+      });
+    }
+  }
+  next();
+});
 
 // Health
 app.get('/', (_, res) => res.json({ status: 'ok' }));
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
-// Models endpoint (shows active model only)
+// Models endpoint
 app.get('/v1/models', (_, res) => {
   res.json({
     object: 'list',
@@ -86,19 +106,23 @@ app.get('/v1/models', (_, res) => {
   });
 });
 
+// Get model safely
+async function getActiveModel() {
+  if (ACTIVE_MODEL) return ACTIVE_MODEL;
+  ACTIVE_MODEL = await resolveModel();
+  MODEL_READY = true;
+  return ACTIVE_MODEL;
+}
+
 // Chat completions endpoint
 app.post('/v1/chat/completions', async (req, res) => {
   const { messages, max_tokens, temperature, stream } = req.body;
 
-  if (!ACTIVE_MODEL) {
-    return res.status(503).json({
-      error: { message: 'Model not initialized yet' }
-    });
-  }
-
   try {
+    const model = await getActiveModel();
+
     const nimRequest = {
-      model: ACTIVE_MODEL,
+      model,
       messages,
       max_tokens: Math.min(max_tokens || 512, 1024),
       temperature: temperature ?? 0.7,
@@ -162,7 +186,7 @@ app.post('/v1/chat/completions', async (req, res) => {
         id: `chatcmpl-${Date.now()}`,
         object: 'chat.completion',
         created: Math.floor(Date.now() / 1000),
-        model: ACTIVE_MODEL,
+        model,
         choices: response.data.choices.map((c, i) => ({
           index: i,
           message: {
