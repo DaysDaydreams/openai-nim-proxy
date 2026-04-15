@@ -14,8 +14,8 @@ const NIM_API_KEY = process.env.NIM_API_KEY;
 
 // Model mapping (OpenAI/Janitor → NIM)
 const MODEL_MAP = {
-  'deepseek-v3_2': 'deepseek-ai/deepseek-v3.1',
-  'gpt-4o-mini': 'deepseek-ai/deepseek-v3.1'
+  'deepseek-v3_2': 'deepseek-ai/deepseek-v3.2',
+  'gpt-4o-mini': 'deepseek-ai/deepseek-v3.2'
 };
 
 // Root / Health
@@ -45,7 +45,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     const nimRequest = {
       model: nimModel,
       messages,
-      max_tokens: Math.min(max_tokens || 512, 1024),
+      max_tokens: Math.min(max_tokens || 512, 4096),
       temperature: temperature ?? 0.7,
       stream: Boolean(stream)
     };
