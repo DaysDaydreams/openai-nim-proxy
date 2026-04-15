@@ -10,17 +10,18 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
-const NIM_API_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
+const NIM_API_BASE =
+  process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
+
 const NIM_API_KEY = process.env.NIM_API_KEY;
 
-// ✅ ONLY VALID MODEL (based on your /v1/models response)
 const ACTIVE_MODEL = 'deepseek-ai/deepseek-v3.2';
 
-// Root / Health
+// Health
 app.get('/', (_, res) => res.json({ status: 'ok' }));
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
-// Models endpoint (OpenAI-style)
+// Models
 app.get('/v1/models', (_, res) => {
   res.json({
     object: 'list',
@@ -35,21 +36,20 @@ app.get('/v1/models', (_, res) => {
   });
 });
 
-// Chat Completions
+// Chat completions
 app.post('/v1/chat/completions', async (req, res) => {
   const { messages, max_tokens, temperature, stream } = req.body;
 
   try {
-const nimRequest = {
-  model: "deepseek-ai/deepseek-v3.2",
-  messages: messages || [{ role: "user", content: "hello" }],
-  max_tokens: Math.min(max_tokens || 256, 256),
-  temperature: temperature ?? 0.7,
-  stream: false
-};
+    const nimRequest = {
+      model: ACTIVE_MODEL,
+      messages: messages || [{ role: 'user', content: 'hello' }],
+      max_tokens: Math.min(max_tokens || 256, 256),
+      temperature: temperature ?? 0.7,
+      stream: Boolean(stream)
     };
 
-    // 🔁 STREAMING
+    // STREAMING
     if (stream) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -62,9 +62,9 @@ const nimRequest = {
         data: nimRequest,
         headers: {
           Authorization: `Bearer ${NIM_API_KEY}`,
-          "Content-Type": "application/json",
-          Accept: "application/json"
-        }
+          'Content-Type': 'application/json',
+          Accept: 'application/json'
+        },
         responseType: 'stream',
         timeout: 0
       });
@@ -85,19 +85,21 @@ const nimRequest = {
 
       nimStream.data.on('error', (err) => {
         console.error('STREAM ERROR:', err.message);
-        res.write(`data: ${JSON.stringify({ error: 'stream failed' })}\n\n`);
+        res.write(
+          `data: ${JSON.stringify({ error: 'stream failed' })}\n\n`
+        );
         res.end();
       });
-
     } else {
-      // 📦 NORMAL REQUEST
+      // NORMAL REQUEST
       const response = await axios.post(
         `${NIM_API_BASE}/chat/completions`,
         nimRequest,
         {
           headers: {
             Authorization: `Bearer ${NIM_API_KEY}`,
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            Accept: 'application/json'
           },
           timeout: 20000
         }
