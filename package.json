@@ -2,6 +2,11 @@
   "name": "nim-openai-proxy",
   "version": "1.0.0",
   "private": true,
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.js"
   },
